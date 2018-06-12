@@ -1,0 +1,11 @@
+---
+
+- name: Add the Elasticsearch group
+  group:
+    name: "{{es_group}}"
+
+- name: Add the Elasticsearch user
+  user:
+    name: "{{es_user}}"
+    groups: "{{es_group}}"
+    system: yes

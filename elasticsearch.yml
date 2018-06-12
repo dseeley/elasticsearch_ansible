@@ -1,0 +1,7 @@
+---
+
+- name: Install all the elasticsearch servers
+  become: true
+  hosts: elasticsearch
+  roles:
+    - elasticsearch

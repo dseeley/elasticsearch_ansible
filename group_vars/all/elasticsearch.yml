@@ -1,0 +1,140 @@
+---
+
+es_artifact_location: "https://artifacts.elastic.co/downloads/elasticsearch"
+es_version: "6.2.4"
+es_user: elasticsearch
+es_group: elasticsearch
+es_home: "/opt/elasticsearch"
+es_pid_dir: "/var/run/elasticsearch"
+es_log_dir: "/var/log/elasticsearch"
+es_data_dir: "/media/logs"
+es_conf_dir: "{{es_home}}/config"
+es_max_open_files: 65536
+es_max_map_count: 262144
+es_extra_config: {
+  bootstrap.memory_lock: true,
+  node.master: true,
+  node.data: true,
+  action.destructive_requires_name: true,
+  thread_pool.search.queue_size: 10000,
+  cluster.routing.allocation.disk.threshold_enabled: false,
+  http.cors.enabled: true,
+  http.cors.allow-origin: "*"
+}
+es_index_codec: best_compression
+es_index_number_of_shards: 1
+es_index_number_of_replicas: 0
+es_network_host: 0.0.0.0
+es_restart_on_change: true
+es_start_service: true
+es_plugins:
+  - plugin: ingest-geoip
+
+install_openjdk_packagemgr: true
+openjdk_package_yum: java-1.8.0-openjdk-devel
+openjdk_package_apt: openjdk-8-jdk-headless
+
+
+
+## An index template, specifically designed for (development) s4nity.com logfile ingestion.
+## + Creates a non-word pattern analyzer more suited to logfiles.
+## + Copies the "_all" field to an "any" field (_all was removed in ES6).
+es_mapping_templates:
+  - name: logs_daily
+    content: {
+          "index_patterns": ["logs*"],
+          "settings": {
+              "index.codec": "{{es_index_codec}}",
+              "index.number_of_shards": "{{es_index_number_of_shards}}",
+              "index.number_of_replicas": "{{es_index_number_of_replicas}}",
+              "index.refresh_interval": "5s",
+              "index.query.default_field": "message",
+              "index.mapping.ignore_malformed": true,
+              "index.mapping.coerce": true,
+              "index.mapping.total_fields.limit": 1500,
+              "index.auto_expand_replicas": false,
+              "analysis": {
+                  "analyzer": {
+                      "nonword": {
+                          "type": "pattern",
+                          "pattern": "[^\\w-\\.]+"
+                      }
+                  }
+              }
+          },
+          "mappings": {
+              "_default_": {
+                  "_all": { "enabled": false },
+                  "numeric_detection": true,
+                  "dynamic_templates": [
+                      {
+                          "message_field": {
+                              "path_match": "message",
+                              "match_mapping_type": "string",
+                              "mapping": {
+                                  "copy_to": "_any",
+                                  "type": "text",
+                                  "analyzer": "nonword",
+                                  "norms": false
+                              }
+                          }
+                      },
+                      {
+                          "loggeo_fields": {
+                              "match": "*geoip*",
+                              "match_mapping_type": "object",
+                              "mapping": {
+                                  "type": "object",
+                                  "path": "full",
+                                  "norms": false,
+                                  "properties": {
+                                      "ip": { "type": "ip" },
+                                      "location": { "type": "geo_point" },
+                                      "latitude": { "type": "half_float" },
+                                      "longitude": { "type": "half_float"}
+                                  }
+                              }
+                          }
+                      },
+                      {
+                          "string_fields": {
+                              "match": "*",
+                              "match_mapping_type": "string",
+                              "mapping": {
+                                  "copy_to": "_any",
+                                  "type": "text",
+                                  "analyzer": "nonword",
+                                  "norms": false,
+                                  "fields": {
+                                      "keyword": { "type": "keyword" }
+                                  }
+                              }
+                          }
+                      },
+                      {
+                          "all_nonstring_fields": {
+                              "match": "*",
+                              "match_mapping_type": "*",
+                              "mapping": {
+                                  "copy_to": "_any",
+                                  "type": "{dynamic_type}",
+                                  "norms": false,
+                                  "fields": {
+                                      "keyword": { "type": "keyword" }
+                                  }
+                              }
+                          }
+                      }
+                  ],
+                  "properties": {
+                      "@timestamp": { "type": "date" },
+                      "type": { "type": "keyword" },
+                      "@version": { "type": "keyword" },
+                      "_any": {
+                          "type": "text",
+                          "analyzer": "nonword",
+                      }
+                  }
+              }
+          }
+      }

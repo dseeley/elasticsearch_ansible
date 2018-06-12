@@ -1,0 +1,57 @@
+---
+
+# Need to do this when we manually add systemd service files to the filesystem
+- name: reload systemd configuration
+  command: systemctl daemon-reload
+
+# Restart elasticsearch and ensure it is enabled
+- name: restart elasticsearch
+  service:
+    name: elasticsearch
+    state: restarted
+    enabled: yes
+  when: es_restart_on_change or es_start_service
+
+
+#Templates are a handler as they need to come after a restart e.g. suppose user removes security on a running node and doesn't
+#specify es_api_basic_auth_username and es_api_basic_auth_password.  The templates will subsequently not be removed if we don't wait for the node to restart.
+#Templates done after restart therefore - as a handler.
+
+- name: load-templates
+  debug: msg="Chaining notifies to load in the templates after (re)starting ES"
+  changed_when: true
+  notify: load-templates - Get template files
+
+- name: load-templates - Get template files
+  find: paths="{{es_conf_dir}}/templates" patterns="*.json"
+  register: templates
+  changed_when: true
+  notify: load-templates - Get template contents
+
+- name: load-templates - Get template contents
+  slurp: src={{ item.path }}
+  with_items: "{{ templates.files }}"
+  register: templates_data
+  changed_when: true
+  notify: load-templates - start elasticsearch
+
+- name: load-templates - start elasticsearch
+  service: name=elasticsearch state=started
+  changed_when: true
+  notify: load-templates - Wait for elasticsearch to startup
+
+- name: load-templates - Wait for elasticsearch to startup
+  wait_for: host=localhost port=9200
+  changed_when: true
+  notify: load-templates - Install templates
+
+- name: load-templates - Install templates
+  uri:
+    url: "http://localhost:9200/_template/{{item.source | basename | splitext | first}}"
+    method: PUT
+    status_code: 200
+#    user: "{{es_api_basic_auth_username}}"
+#    password: "{{es_api_basic_auth_password}}"
+    body_format: json
+    body: "{{ item['content'] | b64decode }}"
+  with_items: "{{ templates_data.results }}"

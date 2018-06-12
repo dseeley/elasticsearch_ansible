@@ -1,0 +1,17 @@
+---
+
+- block:
+  - name: Install latest openjdk from apt repo on Debian systems
+    apt:
+      name: "{{openjdk_package_apt}}"
+      state: latest
+    when: ansible_os_family == 'Debian'
+
+  #Install the devel version for module installation
+  - name: Install latest openjdk from yum repo on RedHat systems (specifically, the devel version to enable module installation)
+    yum:
+      name: java-1.8.0-openjdk-devel
+      state: latest
+    when: ansible_os_family == 'RedHat'
+  when: install_openjdk_packagemgr == True
+

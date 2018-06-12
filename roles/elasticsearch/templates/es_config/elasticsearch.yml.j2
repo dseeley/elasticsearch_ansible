@@ -1,0 +1,29 @@
+{{ ansible_managed | comment }}
+
+{% if cluster_name is not defined %}
+cluster.name: elasticsearch
+{% else %}
+cluster.name: {{ cluster_name }}
+{% endif %}
+
+node.name: {{cluster_name}}_{{ansible_hostname}}
+
+
+## Path to directory where to store the data (separate multiple locations by comma):
+path.data: {{ es_data_dir }}
+
+# Path to log files:
+path.logs: {{ es_log_dir }}
+
+network.host: {{ es_network_host }}
+
+
+{% if es_extra_config %}
+{{ es_extra_config | to_nice_yaml }}
+{% endif %}
+
+## Pass an initial list of hosts to perform discovery when new node is started (default list of hosts is ["127.0.0.1", "[::1]"]):
+discovery.zen.ping.unicast.hosts: {{ all_hosts_fqdn }}
+
+## Prevent the "split brain" by configuring the majority of nodes (total number of master-eligible nodes / 2 + 1):
+#discovery.zen.minimum_master_nodes: 

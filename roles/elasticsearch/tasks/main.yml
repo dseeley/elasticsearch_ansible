@@ -1,0 +1,33 @@
+---
+
+- include: users.yml
+  tags: users
+
+- include: install-binary.yml
+  tags: binary
+
+- include: install-plugins.yml
+  tags: plugins
+
+- include: install-config.yml
+  tags: config
+
+
+## Fail if ES doesn't start up (assuming we asked it to)
+- block:
+  - meta: flush_handlers
+  - wait_for:
+      host: localhost
+      port: 9200
+      timeout: 30
+    register: service_elasticsearch_status
+
+  - name: Report status of elasticsearch if not running
+    fail:
+      msg: |
+        service_elasticsearch_status is not running.
+        Output of `systemctl status elasticsearch`:
+        {{ service_elasticsearch_status.stdout }}
+        {{ service_elasticsearch_status.stderr }}
+    when: service_elasticsearch_status is failed
+  when: es_restart_on_change and es_start_service

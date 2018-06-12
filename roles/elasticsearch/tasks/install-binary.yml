@@ -1,0 +1,74 @@
+---
+
+##This is no good - if it's already running, this starts up another instance to get the version, which may OOM.
+#- name: Check if ES is installed
+#  shell: "{{es_home}}/bin/elasticsearch --version | grep \"Version: {{es_version}}\""
+#  failed_when: es_install_check.rc > 1
+#  changed_when: no
+#  register: es_install_check
+
+- name: Check Elasticsearch installed version
+  stat:
+    path: "/opt/elasticsearch-{{es_version}}"
+  register: this_es_installed
+
+- name: Check any Elasticsearch installed
+  stat:
+    path: "{{es_home}}"
+  register: es_link_stat
+
+#- debug: msg={{this_es_installed.stat}}
+#- debug: msg={{es_link_stat.stat}}
+
+# If it's already installed and latest, do nothing
+# If it's not installed, install
+# If a different version is installed, stop the service and remove the soft link.
+- block:
+  - block:
+    - name: Stop/Disable Elasticsearch
+      service:
+        name: elasticsearch
+        state: stopped
+        enabled: no
+
+    - name: Remove the ES link
+      file:
+        path: "{{es_home}}"
+        state: absent
+    when: es_link_stat.stat.exists and es_link_stat.stat.lnk_source == '/opt/elasticsearch-{{es_version}}'
+
+  - name: Get Elasticsearch artifact
+    get_url:
+      url: "{{es_artifact_location}}/elasticsearch-{{es_version}}.tar.gz"
+      dest: "/opt/elasticsearch-{{es_version}}.tar.gz"
+
+  - name: Extract the Elasticsearch artifact
+    unarchive:
+      remote_src: true
+      src: "/opt/elasticsearch-{{es_version}}.tar.gz"
+      dest: /opt
+    notify: restart elasticsearch
+
+  # 'owner' and 'group' directives in unarchive do not work for tar.gz files
+  - name: Change ownership of the ES dir
+    file:
+      state: directory
+      recurse: true
+      path: "/opt/elasticsearch-{{es_version}}"
+      owner: "{{es_user}}"
+      group: "{{es_group}}"
+    notify: restart elasticsearch
+
+  - name: Create the ES link
+    file:
+      src: "/opt/elasticsearch-{{es_version}}"
+      dest: "{{es_home}}"
+      state: link
+      mode: 0755
+      owner: "{{es_user}}"
+      group: "{{es_group}}"
+    notify: restart elasticsearch
+
+  when: (not this_es_installed.stat.exists) or (not es_link_stat.stat.exists) or (es_link_stat.stat.exists and not es_link_stat.stat.lnk_source == es_loc)
+  vars:
+    es_loc: "/opt/elasticsearch-{{es_version}}"

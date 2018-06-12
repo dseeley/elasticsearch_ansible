@@ -1,0 +1,139 @@
+---
+
+- name: Create pid, log and conf directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{es_user}}"
+    group: "{{es_group}}"
+    mode: "2755"
+  with_items:
+    - "{{es_pid_dir}}"
+    - "{{es_log_dir}}"
+    - "{{es_conf_dir}}"
+    - "{{es_conf_dir}}/templates"
+
+
+- name: Set es_heap_size to half installed
+  set_fact: es_heap_size="{{ (ansible_memtotal_mb / 2) | round | int | abs }}m"
+  when: es_heap_size is not defined
+  tags:
+    setmem
+
+##Determine whether the datadir is a mount point - we'd prefer that it is.
+#- set_fact:
+#    es_data_is_mountpoint: true
+#  with_items: "{{ansible_mounts}}"
+#  when: es_data_dir in item.mount
+
+#Create data directory if mountpoint doesn't exist already
+- name: Create data dir if it doesn't exist
+  file:
+    path: "{{es_data_dir}}"
+    state: directory
+    owner: "{{es_user}}"
+    group: "{{es_group}}"
+    mode: 0755
+  notify: restart elasticsearch
+
+- name: Copy Systemd File
+  template:
+    src: etc/systemd/system/elasticsearch.service.j2
+    dest: /etc/systemd/system/elasticsearch.service
+    mode: 0644
+    force: yes
+  notify:
+  - reload systemd configuration
+  - restart elasticsearch
+
+- name: Copy log4j2.properties File for Instance
+  template:
+    src: es_config/log4j2.properties.j2
+    dest: "{{es_conf_dir}}/log4j2.properties"
+    owner: "{{es_user}}"
+    group: "{{es_group}}"
+    mode: 0644
+    force: yes
+  notify: restart elasticsearch
+
+- name: Copy jvm.options File for Instance
+  template:
+    src: es_config/jvm.options.j2
+    dest: "{{es_conf_dir}}/jvm.options"
+    owner: "{{es_user}}"
+    group: "{{es_group}}"
+    mode: 0644
+    force: yes
+  notify: restart elasticsearch
+
+#- name: Get peer hosts for discovery
+#  set_fact:
+#    elasticsearch_peers: "{{ elasticsearch_peers | default([]) + [hostvars[item]['ansible_hostname'] + '.' + dns_zone_external]}}"
+#  with_items: "{{ansible_play_hosts}}"
+#  when: item not in ansible_hostname
+
+- name: Get all hosts for discovery
+  set_fact:
+    all_hosts_fqdn: "[{{ ansible_play_hosts | map('regex_replace', '^(.*)$', '\\1.' + dns_zone_external ) | join(',') }}]"
+
+- name: Copy ES Configuration File
+  template:
+    src: es_config/elasticsearch.yml.j2
+    dest: "{{es_conf_dir}}/elasticsearch.yml"
+    owner: "{{es_user}}"
+    group: "{{es_group}}"
+    mode: 0644
+    force: yes
+  notify: restart elasticsearch
+
+- name: Copy ES templates
+  copy:
+    content: "{{ item.content | to_nice_json }}"
+    dest: "{{es_conf_dir}}/templates/{{item.name}}.json"
+    owner: "{{es_user}}"
+    group: "{{es_group}}"
+    mode: 644
+    force: yes
+  with_items: "{{ es_mapping_templates }}"
+  notify: load-templates
+  when: es_mapping_templates is defined
+  tags: install_es_templates
+
+- name: Create ES templates Readme
+  copy:
+    content: "Note that these templates are managed and installed by Ansible"
+    dest: "{{es_conf_dir}}/templates/README.txt"
+    owner: "{{es_user}}"
+    group: "{{es_group}}"
+    mode: 644
+    force: yes
+
+- name: Copy tmpfiles.d
+  template:
+    src: usr/lib/tmpfiles.d/elasticsearch.conf.j2
+    dest: "/usr/lib/tmpfiles.d/elasticsearch.conf"
+    owner: "{{es_user}}"
+    group: "{{es_group}}"
+    mode: 0644
+    force: yes
+  notify: restart elasticsearch
+
+- name: Copy sysctl.d/elasticsearch.conf
+  template:
+    src: usr/lib/sysctl.d/elasticsearch.conf.j2
+    dest: "/usr/lib/sysctl.d/elasticsearch.conf"
+    owner: "{{es_user}}"
+    group: "{{es_group}}"
+    mode: 0644
+    force: yes
+  notify: restart elasticsearch
+
+#This needs to be set programmatically, or ES will not start.  A reboot will do it, but not ideal.
+- name: get vm.max_map_count status
+  command: "sysctl vm.max_map_count"
+  register: vm_max_map_count
+  changed_when: false
+
+- name: set vm.max_map_count
+  command: "sysctl -w vm.max_map_count={{es_max_map_count}}"
+  when: vm_max_map_count.stdout is not search(es_max_map_count|string)

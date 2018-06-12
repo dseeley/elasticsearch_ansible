@@ -1,0 +1,40 @@
+---
+
+#List currently installed plugins - ignore xpack if > v 2.0
+- name: Check installed elasticsearch plugins
+  shell: "{{es_home}}/bin/elasticsearch-plugin list | grep -vE 'x-pack'"
+  register: installed_plugins
+  failed_when: "'ERROR' in installed_plugins.stdout"
+  changed_when: False
+  ignore_errors: yes
+  environment:
+    CONF_DIR: "{{ es_conf_dir }}"
+
+# This removes any currently installed plugins (to prevent errors when reinstalling)
+- name: Remove elasticsearch plugins
+  command: "{{es_home}}/bin/elasticsearch-plugin remove {{item}} --silent"
+  ignore_errors: yes
+  with_items: "{{ installed_plugins.stdout_lines | default([]) }}"
+  when: installed_plugins.stdout_lines | length > 0 and not 'No plugin detected' in installed_plugins.stdout_lines[0]
+  notify: restart elasticsearch
+  register: plugin_removed
+  environment:
+    CONF_DIR: "{{ es_conf_dir }}"
+
+- name: Install elasticsearch plugins
+  command: "{{es_home}}/bin/elasticsearch-plugin install {{ item.plugin }} --batch --silent {% if item.proxy_host is defined and item.proxy_host != '' and item.proxy_port is defined and item.proxy_port != ''%} -DproxyHost={{ item.proxy_host }} -DproxyPort={{ item.proxy_port }} {% elif es_proxy_host is defined and es_proxy_host != '' %} -DproxyHost={{ es_proxy_host }} -DproxyPort={{ es_proxy_port }} {% endif %}"
+  register: plugin_installed
+  failed_when: "'ERROR' in plugin_installed.stdout"
+  changed_when: plugin_installed.rc == 0
+  with_items: "{{ es_plugins | default([]) }}"
+  when: not es_plugins is none
+  notify: restart elasticsearch
+  environment:
+    CONF_DIR: "{{ es_conf_dir }}"
+  until: plugin_installed.rc == 0
+  retries: 5
+  delay: 5
+
+#Set permissions on plugins directory
+- name: Set Plugin Directory Permissions
+  file: state=directory path={{ es_home }}/plugins owner={{ es_user }} group={{ es_group }} recurse=yes

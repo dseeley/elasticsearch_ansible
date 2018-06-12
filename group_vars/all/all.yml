@@ -1,0 +1,14 @@
+---
+
+buildenv: "dev"
+
+app_class: "monitoring"
+clustername_prefix: "estest"
+
+dns_tld_external: "dougalseeley.com"
+
+# The global {{cluster_name}} is prefixed with "{{clustername_prefix}}-" if clustername_prefix is defined
+cluster_name: "{{clustername_prefix}}{% if not clustername_prefix | regex_search('.*-$') %}-{% endif -%}{{buildenv}}"
+
+
+dns_zone_external: "aws_euw1.{{app_class}}.{{buildenv}}.{{dns_tld_external}}"
